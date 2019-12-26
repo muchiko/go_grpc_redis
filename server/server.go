@@ -24,8 +24,8 @@ func Run() {
 		DB:       0,  // use default DB
 	})
 
-	// pong, err := client.Ping().Result()
-	// fmt.Println(pong, err)
+	pong, err := client.Ping().Result()
+	fmt.Println(pong, err)
 
 	s := grpc.NewServer()
 	pb.RegisterSocketServiceServer(s, &server{
@@ -58,28 +58,33 @@ func (s *server) Transport(stream pb.SocketService_TransportServer) error {
 		case "set":
 			err := s.rdb.Set("key", in.Message, 0).Err()
 			if err != nil {
+				fmt.Println(err)
 				return err
 			}
 		case "sub":
 			pubsub := s.rdb.Subscribe("room")
 			_, err := pubsub.Receive()
 			if err != nil {
+				fmt.Println(err)
 				return err
 			}
 			ch := pubsub.Channel()
-			select {
-			case msg := <-ch:
-				fmt.Println("Transport")
-				err = stream.Send(&pb.Payload{
-					Message: msg.Payload,
-				})
-				if err != nil {
-					return err
+
+			go func(ch <-chan *redis.Message, stream pb.SocketService_TransportServer) {
+				for {
+					select {
+					case msg := <-ch:
+						fmt.Println("Transport")
+						stream.Send(&pb.Payload{
+							Message: msg.Payload,
+						})
+					}
 				}
-			}
+			}(ch, stream)
 		case "pub":
 			err := s.rdb.Publish("room", "in-api").Err()
 			if err != nil {
+				fmt.Println(err)
 				return err
 			}
 		default:
@@ -90,6 +95,7 @@ func (s *server) Transport(stream pb.SocketService_TransportServer) error {
 			Message: "OK",
 		})
 		if err != nil {
+			fmt.Println(err)
 			return err
 		}
 	}
